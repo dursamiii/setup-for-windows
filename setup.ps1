@@ -3,46 +3,61 @@
 
 $ErrorActionPreference = "Stop"
 
-$username = "default"
-$password = ConvertTo-SecureString "12345677" -AsPlainText -Force
+$username = "$env:COMPUTERNAME\default"
+$drives = @("E:", "F:", "G:")
 
 try {
-    Write-Host "[1/3] Configuring user..." -ForegroundColor Cyan
+    Write-Host "[1/3] Configuring SMB Server..."
 
-    $user = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
+    Set-Service LanmanServer -StartupType Automatic
+    Start-Service LanmanServer
 
-    if (-not $user) {
-        New-LocalUser -Name $username -Password $password -Description "Local Administrator" | Out-Null
+    Write-Host "[2/3] Configuring drive permissions..."
+
+    foreach ($drive in $drives) {
+        if (-not (Test-Path "$drive\")) {
+            Write-Host "Skipping unavailable drive: $drive"
+            continue
+        }
+
+        & icacls.exe "$drive\" /grant "${username}:(OI)(CI)F"
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to configure NTFS permissions on $drive"
+        }
     }
-    else {
-        Set-LocalUser -Name $username -Password $password
+
+    Write-Host "[3/3] Creating SMB shares..."
+
+    foreach ($drive in $drives) {
+        if (-not (Test-Path "$drive\")) {
+            continue
+        }
+
+        $shareName = "$($drive[0])-Drive"
+
+        $existing = Get-SmbShare -Name $shareName -ErrorAction SilentlyContinue
+
+        if ($existing) {
+            Remove-SmbShare -Name $shareName -Force -Confirm:$false
+        }
+
+        New-SmbShare `
+            -Name $shareName `
+            -Path "$drive\" `
+            -FullAccess $username | Out-Null
     }
 
-    Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
+    Write-Host "`n[SUCCESS] Drive sharing configured!" -ForegroundColor Green
 
-    Write-Host "[2/3] Configuring drive permissions..." -ForegroundColor Cyan
-
-    $acl = Get-Acl "D:\"
-
-    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-        $username,
-        "FullControl",
-        "ContainerInherit,ObjectInherit",
-        "None",
-        "Allow"
-    )
-
-    $acl.SetAccessRule($rule)
-    Set-Acl -Path "D:\" -AclObject $acl
-
-    Write-Host "[3/3] Setup complete!" -ForegroundColor Green
-
-    Write-Host "Username: $username"
-    Write-Host "Password: 12345677"
+    foreach ($drive in $drives) {
+        if (Test-Path "$drive\") {
+            Write-Host "\\$env:COMPUTERNAME\$($drive[0])-Drive"
+        }
+    }
 }
 catch {
     Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
 }
 
-Read-Host "Press ENTER to exit"
+Read-Host "`nPress ENTER to exit"
