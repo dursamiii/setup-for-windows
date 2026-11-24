@@ -3,57 +3,46 @@
 
 $ErrorActionPreference = "Stop"
 
-$shareName = "D-Drive"
-$sharePath = "D:\"
+$username = "default"
+$password = ConvertTo-SecureString "12345677" -AsPlainText -Force
 
 try {
-    Write-Host "[1/4] Configuring SMB Server..." -ForegroundColor Cyan
+    Write-Host "[1/3] Configuring user..." -ForegroundColor Cyan
 
-    Set-Service -Name LanmanServer -StartupType Automatic
-    Start-Service -Name LanmanServer
+    $user = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
 
-    Write-Host "[2/4] Configuring NTFS permissions..." -ForegroundColor Cyan
+    if (-not $user) {
+        New-LocalUser -Name $username -Password $password -Description "Local Administrator" | Out-Null
+    }
+    else {
+        Set-LocalUser -Name $username -Password $password
+    }
 
-    $acl = Get-Acl $sharePath
+    Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
+
+    Write-Host "[2/3] Configuring drive permissions..." -ForegroundColor Cyan
+
+    $acl = Get-Acl "D:\"
 
     $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-        "Everyone",
-        "ReadAndExecute",
+        $username,
+        "FullControl",
         "ContainerInherit,ObjectInherit",
         "None",
         "Allow"
     )
 
     $acl.SetAccessRule($rule)
-    Set-Acl -Path $sharePath -AclObject $acl
+    Set-Acl -Path "D:\" -AclObject $acl
 
-    Write-Host "[3/4] Creating SMB Share..." -ForegroundColor Cyan
+    Write-Host "[3/3] Setup complete!" -ForegroundColor Green
 
-    $existing = Get-SmbShare -Name $shareName -ErrorAction SilentlyContinue
-
-    if ($existing) {
-        Remove-SmbShare -Name $shareName -Force -Confirm:$false
-    }
-
-    New-SmbShare `
-        -Name $shareName `
-        -Path $sharePath `
-        -ReadAccess "Everyone" `
-        -FolderEnumerationMode AccessBased | Out-Null
-
-    Write-Host "[4/4] Configuring Firewall..." -ForegroundColor Cyan
-
-    Get-NetFirewallRule -DisplayGroup "File and Printer Sharing" -ErrorAction SilentlyContinue |
-        Where-Object { $_.Profile -match "Private" } |
-        Enable-NetFirewallRule
-
-    Write-Host "`n[SUCCESS] Configuration complete!" -ForegroundColor Green
-    Write-Host "Share: \\$env:COMPUTERNAME\$shareName"
-    Write-Host "Access: Read Only"
+    Write-Host "Username: $username"
+    Write-Host "Password: 12345677"
 }
 catch {
-    Write-Host "`n[ERROR] $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
     Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
 }
 
-Read-Host "`nPress ENTER to exit"
+Read-Host "Press ENTER to exit"
