@@ -4,7 +4,7 @@
 $ErrorActionPreference = "Stop"
 
 $username = "$env:COMPUTERNAME\default"
-$drives = @("E:", "F:", "G:")
+$drives = @("M:", "K:")
 
 try {
     Write-Host "[1/3] Configuring SMB Server..."
