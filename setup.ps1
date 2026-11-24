@@ -3,45 +3,53 @@
 
 $ErrorActionPreference = "Stop"
 
-$username = "sahimaru"
-$password = ConvertTo-SecureString "12345677" -AsPlainText -Force
+$shareName = "D"
+$sharePath = "D:\"
 
-Write-Host "Configuring Windows..." -ForegroundColor Cyan
+Write-Host "Configuring Samba / SMB..." -ForegroundColor Cyan
 
 try {
-    $user = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
+    # Create dedicated shared folder
+    New-Item -ItemType Directory -Path $sharePath -Force | Out-Null
 
-    if (-not $user) {
-        New-LocalUser -Name $username -Password $password -Description "Local Administrator Account" | Out-Null
-    }
-    else {
-        Set-LocalUser -Name $username -Password $password
-    }
+    # Enable SMB server
+    Set-Service -Name LanmanServer -StartupType Automatic
+    Start-Service -Name LanmanServer
 
-    Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction SilentlyContinue
+    # Configure folder permissions
+    $acl = Get-Acl $sharePath
+    $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        "Everyone",
+        "ReadAndExecute",
+        "ContainerInherit,ObjectInherit",
+        "None",
+        "Allow"
+    )
+    $acl.SetAccessRule($rule)
+    Set-Acl -Path $sharePath -AclObject $acl
 
-    $drives = @("D:", "E:", "F:", "G:", "K:", "M:")
-
-    foreach ($drive in $drives) {
-        if (Test-Path "$drive\") {
-            $acl = Get-Acl "$drive\"
-
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                $username,
-                "FullControl",
-                "ContainerInherit,ObjectInherit",
-                "None",
-                "Allow"
-            )
-
-            $acl.SetAccessRule($rule)
-            Set-Acl -Path "$drive\" -AclObject $acl
-        }
+    # Create read-only share
+    if (Get-SmbShare -Name $shareName -ErrorAction SilentlyContinue) {
+        Remove-SmbShare -Name $shareName -Force
     }
 
-    Write-Host "`rConfiguration complete.          " -ForegroundColor Green
+    New-SmbShare `
+        -Name $shareName `
+        -Path $sharePath `
+        -ReadAccess "Everyone" `
+        -FolderEnumerationMode AccessBased | Out-Null
+
+    # Restrict SMB firewall rules to Private networks
+    Set-NetFirewallRule `
+        -DisplayGroup "File and Printer Sharing" `
+        -Profile Private `
+        -Enabled True
+
+    Write-Host "Configuration complete." -ForegroundColor Green
+    Write-Host "Share: \\$env:COMPUTERNAME\$shareName"
+    Write-Host "Path: $sharePath"
 }
 catch {
-    Write-Host "`rConfiguration failed: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Configuration failed: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
