@@ -3,8 +3,8 @@
 
 $ErrorActionPreference = "Stop"
 
-$shareName = "D"
-$sharePath = "D:\"
+$shareName = "E"
+$sharePath = "E:\"
 
 Write-Host "Configuring Samba / SMB..." -ForegroundColor Cyan
 
